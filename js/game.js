@@ -7,6 +7,8 @@ const MAP_COLS = 40;
 const MAP_ROWS = 30;
 const MAP_W = MAP_COLS * TILE;
 const MAP_H = MAP_ROWS * TILE;
+const MAX_PARTICLES = 300;
+const MAX_HAZARD_ZONES = 15;
 
 // Colors
 const COLORS = {
@@ -1299,6 +1301,8 @@ function update() {
 
     // --- Update particles (frozen when modal open) ---
     if (!state.modalOpen) {
+    // Cap particles to prevent slowdown
+    while (state.particles.length > MAX_PARTICLES) state.particles.shift();
     for (let i = state.particles.length - 1; i >= 0; i--) {
         const part = state.particles[i];
         part.x += part.vx;
@@ -1320,6 +1324,7 @@ function update() {
 
     // --- Update hazard zones ---
     if (!state.modalOpen) {
+    while (state.hazardZones.length > MAX_HAZARD_ZONES) state.hazardZones.shift();
     for (let i = state.hazardZones.length - 1; i >= 0; i--) {
         state.hazardZones[i].life--;
         if (state.hazardZones[i].life <= 0) state.hazardZones.splice(i, 1);
@@ -1432,22 +1437,18 @@ function drawBuilding(b) {
         const wDef = WEAPON_DEFS[activeWeapon];
         const bobY = Math.sin(state.time * 0.06) * 6;
 
-        // Glow beacon
+        // Glow beacon (simple circle, no gradient)
         ctx.save();
-        const glowSize = 30 + Math.sin(state.time * 0.08) * 8;
-        const gradient = ctx.createRadialGradient(sx + w / 2, sy - 20 + bobY, 0, sx + w / 2, sy - 20 + bobY, glowSize);
-        gradient.addColorStop(0, 'rgba(255, 193, 7, 0.3)');
-        gradient.addColorStop(1, 'rgba(255, 193, 7, 0)');
-        ctx.fillStyle = gradient;
+        ctx.globalAlpha = 0.25;
+        ctx.fillStyle = '#ffc107';
         ctx.beginPath();
-        ctx.arc(sx + w / 2, sy - 20 + bobY, glowSize, 0, Math.PI * 2);
+        ctx.arc(sx + w / 2, sy - 20 + bobY, 28, 0, Math.PI * 2);
         ctx.fill();
+        ctx.globalAlpha = 1;
 
         // Icon
         ctx.font = '24px system-ui, sans-serif';
         ctx.textAlign = 'center';
-        ctx.shadowColor = 'rgba(255,193,7,0.8)';
-        ctx.shadowBlur = 12;
         ctx.fillText(wDef.icon, sx + w / 2, sy - 14 + bobY);
         ctx.restore();
     }
@@ -1456,8 +1457,7 @@ function drawBuilding(b) {
         ctx.save();
         ctx.strokeStyle = b.roofColor;
         ctx.lineWidth = 3;
-        ctx.shadowColor = b.roofColor;
-        ctx.shadowBlur = 15 + Math.sin(state.time * 0.08) * 5;
+        ctx.globalAlpha = 0.7;
         ctx.strokeRect(sx - 4, sy - 4, w + 8, h + 8);
         ctx.restore();
     }
@@ -1466,8 +1466,6 @@ function drawBuilding(b) {
     ctx.font = 'bold 14px system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = '#fff';
-    ctx.shadowColor = 'rgba(0,0,0,0.8)';
-    ctx.shadowBlur = 4;
     ctx.fillText(b.label, sx + w / 2, sy - 10);
     ctx.restore();
 }
@@ -1543,8 +1541,6 @@ function drawPlayer() {
     ctx.font = 'bold 11px system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = '#4fc3f7';
-    ctx.shadowColor = 'rgba(0,0,0,0.8)';
-    ctx.shadowBlur = 3;
     ctx.fillText('Vierailija', sx + TILE / 2, sy - 4);
     ctx.restore();
 
@@ -1558,8 +1554,6 @@ function drawPlayer() {
         ctx.font = 'bold 13px system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.fillStyle = '#ffc107';
-        ctx.shadowColor = 'rgba(0,0,0,0.9)';
-        ctx.shadowBlur = 4;
         ctx.fillText(n.text, sx + TILE / 2, sy - 18 - floatY);
         ctx.restore();
     }
@@ -1578,16 +1572,21 @@ function drawEnemy(e) {
     ctx.ellipse(sx, sy + def.size * 0.6, def.size * 0.6, def.size * 0.2, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Body glow
+    // Body
     ctx.save();
-    ctx.shadowColor = def.color;
-    ctx.shadowBlur = 8 + Math.sin(state.time * 0.1 + e.x) * 3;
 
     // Flash white when hit
     const bodyColor = e.hitFlash > 0 ? '#fff' : def.bodyColor;
     const headColor = e.hitFlash > 0 ? '#fff' : def.color;
 
-    // Body
+    // Glow ring (cheap alternative to shadowBlur)
+    ctx.globalAlpha = 0.2;
+    ctx.fillStyle = def.color;
+    ctx.beginPath();
+    ctx.arc(sx, sy, def.size * 0.9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
     ctx.fillStyle = bodyColor;
     ctx.beginPath();
     ctx.arc(sx, sy, def.size * 0.7, 0, Math.PI * 2);
@@ -1679,8 +1678,6 @@ function drawEnemy(e) {
     ctx.font = '10px system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = def.color;
-    ctx.shadowColor = 'rgba(0,0,0,0.8)';
-    ctx.shadowBlur = 2;
     ctx.fillText(def.name, sx, sy - def.size - 12);
     ctx.restore();
 }
@@ -1693,8 +1690,6 @@ function drawProjectiles() {
         if (sx < -20 || sx > canvas.width + 20 || sy < -20 || sy > canvas.height + 20) continue;
 
         ctx.save();
-        ctx.shadowColor = proj.color;
-        ctx.shadowBlur = 10;
         ctx.fillStyle = proj.color;
         ctx.beginPath();
         ctx.arc(sx, sy, proj.size, 0, Math.PI * 2);
@@ -1734,22 +1729,27 @@ function drawBeams() {
         const alpha = beam.life / beam.maxLife;
 
         ctx.save();
-        // Outer glow
-        ctx.globalAlpha = alpha * 0.3;
+        // Outer glow (no shadowBlur)
+        ctx.globalAlpha = alpha * 0.15;
         ctx.strokeStyle = beam.color;
-        ctx.lineWidth = 12;
-        ctx.shadowColor = beam.color;
-        ctx.shadowBlur = 20;
+        ctx.lineWidth = 18;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+
+        // Mid glow
+        ctx.globalAlpha = alpha * 0.3;
+        ctx.lineWidth = 8;
         ctx.beginPath();
         ctx.moveTo(x1, y1);
         ctx.lineTo(x2, y2);
         ctx.stroke();
 
         // Core beam
-        ctx.globalAlpha = alpha * 0.8;
+        ctx.globalAlpha = alpha * 0.9;
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 3;
-        ctx.shadowBlur = 10;
         ctx.beginPath();
         ctx.moveTo(x1, y1);
         ctx.lineTo(x2, y2);
@@ -1767,68 +1767,46 @@ function drawHazardZones() {
             sy < -zone.radius * 2 || sy > canvas.height + zone.radius * 2) continue;
 
         const alpha = Math.min(1, zone.life / 90) * 0.85;
-        const pulse = 1 + Math.sin(state.time * 0.08) * 0.06;
 
         ctx.save();
 
-        // Dark base pool (opaque)
-        const baseGrad = ctx.createRadialGradient(sx, sy, 0, sx, sy, zone.radius * pulse);
-        baseGrad.addColorStop(0, `rgba(62, 39, 25, ${alpha * 0.9})`);
-        baseGrad.addColorStop(0.5, `rgba(78, 52, 33, ${alpha * 0.75})`);
-        baseGrad.addColorStop(0.85, `rgba(93, 64, 46, ${alpha * 0.4})`);
-        baseGrad.addColorStop(1, `rgba(93, 64, 46, 0)`);
-        ctx.fillStyle = baseGrad;
+        // Dark base pool
+        ctx.globalAlpha = alpha * 0.8;
+        ctx.fillStyle = '#3e2719';
         ctx.beginPath();
-        ctx.arc(sx, sy, zone.radius * pulse, 0, Math.PI * 2);
+        ctx.arc(sx, sy, zone.radius, 0, Math.PI * 2);
         ctx.fill();
 
-        // Bright coffee sheen highlight
-        const sheenGrad = ctx.createRadialGradient(
-            sx - zone.radius * 0.2, sy - zone.radius * 0.2, 0,
-            sx, sy, zone.radius * 0.7
-        );
-        sheenGrad.addColorStop(0, `rgba(180, 130, 80, ${alpha * 0.5})`);
-        sheenGrad.addColorStop(0.5, `rgba(160, 110, 60, ${alpha * 0.25})`);
-        sheenGrad.addColorStop(1, `rgba(140, 90, 50, 0)`);
-        ctx.fillStyle = sheenGrad;
+        // Inner lighter coffee
+        ctx.globalAlpha = alpha * 0.6;
+        ctx.fillStyle = '#6d4c36';
         ctx.beginPath();
         ctx.arc(sx, sy, zone.radius * 0.7, 0, Math.PI * 2);
         ctx.fill();
 
-        // Glowing edge ring
+        // Sheen highlight
+        ctx.globalAlpha = alpha * 0.35;
+        ctx.fillStyle = '#b4824f';
+        ctx.beginPath();
+        ctx.arc(sx - zone.radius * 0.15, sy - zone.radius * 0.15, zone.radius * 0.4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Edge ring
         ctx.globalAlpha = alpha * 0.4;
         ctx.strokeStyle = '#a1887f';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(sx, sy, zone.radius * pulse * 0.9, 0, Math.PI * 2);
+        ctx.arc(sx, sy, zone.radius * 0.9, 0, Math.PI * 2);
         ctx.stroke();
 
-        // Bubbles
-        ctx.globalAlpha = alpha * 0.8;
-        for (let i = 0; i < 5; i++) {
-            const bx = sx + Math.sin(state.time * 0.06 + i * 1.9) * zone.radius * 0.5;
-            const by = sy + Math.cos(state.time * 0.08 + i * 1.4) * zone.radius * 0.5;
-            const bs = 2.5 + Math.sin(state.time * 0.15 + i * 0.7) * 1.5;
-            ctx.fillStyle = '#c8a882';
-            ctx.beginPath();
-            ctx.arc(bx, by, bs, 0, Math.PI * 2);
-            ctx.fill();
-            // Bubble highlight
-            ctx.fillStyle = `rgba(220, 190, 150, ${alpha * 0.5})`;
-            ctx.beginPath();
-            ctx.arc(bx - 1, by - 1, bs * 0.4, 0, Math.PI * 2);
-            ctx.fill();
-        }
-
-        // Steam wisps rising above the pool
-        ctx.globalAlpha = alpha * 0.3;
-        ctx.fillStyle = 'rgba(200, 180, 160, 0.4)';
+        // Bubbles (3 instead of 5, no highlights)
+        ctx.globalAlpha = alpha * 0.7;
+        ctx.fillStyle = '#c8a882';
         for (let i = 0; i < 3; i++) {
-            const wx = sx + Math.sin(state.time * 0.03 + i * 2.5) * zone.radius * 0.3;
-            const wy = sy - zone.radius * 0.3 - (state.time * 0.5 + i * 15) % 30;
-            const ws = 4 + Math.sin(state.time * 0.04 + i) * 2;
+            const bx = sx + Math.sin(state.time * 0.06 + i * 1.9) * zone.radius * 0.4;
+            const by = sy + Math.cos(state.time * 0.08 + i * 1.4) * zone.radius * 0.4;
             ctx.beginPath();
-            ctx.arc(wx, wy, ws, 0, Math.PI * 2);
+            ctx.arc(bx, by, 3, 0, Math.PI * 2);
             ctx.fill();
         }
 
@@ -1847,8 +1825,6 @@ function drawPickupNotification() {
     ctx.font = 'bold 22px system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = '#4fc3f7';
-    ctx.shadowColor = 'rgba(0,0,0,0.8)';
-    ctx.shadowBlur = 6;
     ctx.fillText(n.text, canvas.width / 2, y);
     ctx.restore();
 }
@@ -1861,8 +1837,6 @@ function drawWaveIndicator() {
         ctx.font = 'bold 28px system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.fillStyle = '#f44336';
-        ctx.shadowColor = 'rgba(244,67,54,0.5)';
-        ctx.shadowBlur = 15;
         ctx.fillText(`Wave ${state.wave}`, canvas.width / 2, 80);
         ctx.font = '16px system-ui, sans-serif';
         ctx.fillStyle = 'rgba(255,255,255,0.7)';
@@ -1950,14 +1924,15 @@ function drawLampPosts() {
         ctx.fillStyle = '#616161';
         ctx.fillRect(sx - 2, sy + 10, 4, 34);
 
-        const glowIntensity = 0.15 + Math.sin(state.time * 0.03 + lamp.x) * 0.05;
-        const gradient = ctx.createRadialGradient(sx, sy + 8, 0, sx, sy + 8, 40);
-        gradient.addColorStop(0, `rgba(255, 235, 130, ${glowIntensity})`);
-        gradient.addColorStop(1, 'rgba(255, 235, 130, 0)');
-        ctx.fillStyle = gradient;
+        // Simple glow (no gradient)
+        ctx.save();
+        ctx.globalAlpha = 0.12;
+        ctx.fillStyle = '#ffeb82';
         ctx.beginPath();
         ctx.arc(sx, sy + 8, 40, 0, Math.PI * 2);
         ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.restore();
 
         ctx.fillStyle = '#ffc107';
         ctx.fillRect(sx - 5, sy + 6, 10, 6);
