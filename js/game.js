@@ -40,7 +40,7 @@ const WEAPON_DEFS = {
         ammo: 30,
         color: '#b3e5fc',
         projectileSize: 5,
-        description: 'Throws keycaps! Fast but light damage.',
+        description: 'Shotgun blast of keycaps! 5 projectiles per shot.',
     },
     coffee: {
         name: 'Hot Coffee Cannon',
@@ -51,18 +51,18 @@ const WEAPON_DEFS = {
         ammo: 15,
         color: '#8d6e63',
         projectileSize: 7,
-        description: 'Scalding hot coffee. Powerful!',
+        description: 'Leaves burning coffee pools on impact.',
     },
     code: {
         name: 'Code Blaster',
         icon: '\uD83D\uDCBB',
-        damage: 15,
+        damage: 22,
         speed: 12,
         fireRate: 8,
-        ammo: 50,
+        ammo: 80,
         color: '#4fc3f7',
         projectileSize: 4,
-        description: 'Rapid fire code snippets.',
+        description: 'Full auto! Hold to spray code snippets.',
     },
     debug: {
         name: 'Debugger Ray',
@@ -73,46 +73,44 @@ const WEAPON_DEFS = {
         ammo: 8,
         color: '#ff5722',
         projectileSize: 9,
-        description: 'The ultimate bug killer.',
+        description: 'Piercing beam that hits all enemies in a line.',
     },
     agile: {
         name: 'Agile Boomerang',
         icon: '\uD83E\uDE83',
-        damage: 25,
+        damage: 40,
         speed: 7,
         fireRate: 22,
         ammo: 20,
         color: '#81c784',
         projectileSize: 6,
-        description: 'Sprint-powered throwing weapon.',
+        description: 'Auto-aims at nearest enemy, returns to you.',
     },
 };
 
 // All weapon keys for random selection
 const WEAPON_KEYS = Object.keys(WEAPON_DEFS);
 
-// Weapon spawn system: only one building has a weapon at a time
-const weaponSpawn = {
-    buildingId: null,      // which building currently holds the weapon
-    weaponKey: null,       // which weapon is available
-    cooldown: 0,           // ticks until next weapon spawns
-    RESPAWN_TIME: 600,     // ~10 seconds between spawns
-    collected: false,      // was the current weapon picked up?
-};
+// Weapon spawn system: multiple buildings can have weapons at once
+const weaponSpawns = [];         // array of { buildingId, weaponKey }
+const WEAPON_SPAWN_INTERVAL = 300; // ~5 seconds between new spawns
+let weaponSpawnTimer = 0;
+const MAX_ACTIVE_WEAPONS = 3;    // cap simultaneous weapons on map
 
 function spawnWeaponInRandomBuilding(forceBuildingId, silent) {
+    // Don't exceed max
+    if (weaponSpawns.length >= MAX_ACTIVE_WEAPONS && !forceBuildingId) return;
+    const occupiedIds = weaponSpawns.map(s => s.buildingId);
     let building;
     if (forceBuildingId) {
         building = BUILDINGS.find(b => b.id === forceBuildingId);
     } else {
-        const available = BUILDINGS.filter(b => b.id !== weaponSpawn.buildingId);
+        const available = BUILDINGS.filter(b => !occupiedIds.includes(b.id));
+        if (available.length === 0) return;
         building = available[Math.floor(Math.random() * available.length)];
     }
     const weapon = WEAPON_KEYS[Math.floor(Math.random() * WEAPON_KEYS.length)];
-    weaponSpawn.buildingId = building.id;
-    weaponSpawn.weaponKey = weapon;
-    weaponSpawn.collected = false;
-    weaponSpawn.cooldown = weaponSpawn.RESPAWN_TIME;
+    weaponSpawns.push({ buildingId: building.id, weaponKey: weapon });
     if (state.started && !silent) {
         state.pickupNotification = {
             text: `${WEAPON_DEFS[weapon].icon} ${WEAPON_DEFS[weapon].name} appeared at ${building.label}!`,
@@ -122,10 +120,13 @@ function spawnWeaponInRandomBuilding(forceBuildingId, silent) {
 }
 
 function getActiveWeaponForBuilding(buildingId) {
-    if (weaponSpawn.buildingId === buildingId && !weaponSpawn.collected) {
-        return weaponSpawn.weaponKey;
-    }
-    return null;
+    const spawn = weaponSpawns.find(s => s.buildingId === buildingId);
+    return spawn ? spawn.weaponKey : null;
+}
+
+function collectWeaponAtBuilding(buildingId) {
+    const idx = weaponSpawns.findIndex(s => s.buildingId === buildingId);
+    if (idx !== -1) weaponSpawns.splice(idx, 1);
 }
 
 // ==========================================
@@ -171,8 +172,8 @@ const ENEMY_TYPES = {
     },
     nullPointer: {
         name: 'NullPointer',
-        hp: 20,
-        speed: 3.0,
+        hp: 1,
+        speed: 2.2,
         damage: 15,
         color: '#00bcd4',
         bodyColor: '#006064',
@@ -180,6 +181,7 @@ const ENEMY_TYPES = {
         score: 15,
         aggroRange: 350,
         attackCooldown: 40,
+        suicidal: true,
     },
 };
 
@@ -348,7 +350,7 @@ const state = {
     },
     camera: { x: 0, y: 0 },
     keys: {},
-    mouse: { x: 0, y: 0 },
+    mouse: { x: 0, y: 0, down: false },
     nearBuilding: null,
     modalOpen: false,
     started: false,
@@ -357,6 +359,9 @@ const state = {
     projectiles: [],
     particles: [],
     pickupNotification: null,
+    noWeaponText: null,
+    beams: [],
+    hazardZones: [],
     score: 0,
     wave: 0,
     waveTimer: 0,
@@ -416,12 +421,17 @@ canvas.addEventListener('mousemove', e => {
     state.mouse.y = e.clientY;
 });
 
-canvas.addEventListener('click', e => {
+canvas.addEventListener('mousedown', e => {
+    state.mouse.down = true;
     if (!state.modalOpen && !state.player.dead && state.started) {
         state.mouse.x = e.clientX;
         state.mouse.y = e.clientY;
         tryShoot();
     }
+});
+
+canvas.addEventListener('mouseup', () => {
+    state.mouse.down = false;
 });
 
 // ==========================================
@@ -430,7 +440,19 @@ canvas.addEventListener('click', e => {
 
 function tryShoot() {
     const p = state.player;
-    if (!p.weapon || p.ammo <= 0 || p.fireCooldown > 0) return;
+    if (!p.weapon || p.ammo <= 0 || p.fireCooldown > 0) {
+        // Show "find a weapon" text if no weapon or no ammo
+        if ((!p.weapon || p.ammo <= 0) && p.fireCooldown <= 0) {
+            const spawn = weaponSpawns[0];
+            const building = spawn ? BUILDINGS.find(b => b.id === spawn.buildingId) : null;
+            const buildingName = building ? building.label : 'a building';
+            const text = !p.weapon
+                ? `Find a weapon at ${buildingName}!`
+                : `Out of ammo! New weapon at ${buildingName}!`;
+            state.noWeaponText = { text, life: 90 };
+        }
+        return;
+    }
 
     const wDef = WEAPON_DEFS[p.weapon];
     p.fireCooldown = wDef.fireRate;
@@ -441,17 +463,149 @@ function tryShoot() {
     const py = p.y + TILE / 2 - state.camera.y;
     const angle = Math.atan2(state.mouse.y - py, state.mouse.x - px);
 
-    state.projectiles.push({
-        x: p.x + TILE / 2,
-        y: p.y + TILE / 2,
-        vx: Math.cos(angle) * wDef.speed,
-        vy: Math.sin(angle) * wDef.speed,
-        damage: wDef.damage,
-        color: wDef.color,
-        size: wDef.projectileSize,
-        life: 120,
-        fromPlayer: true,
-    });
+    // Debugger Ray: hitscan beam instead of projectile
+    if (p.weapon === 'debug') {
+        const originX = p.x + TILE / 2;
+        const originY = p.y + TILE / 2;
+        const rayLen = 800;
+        const endX = originX + Math.cos(angle) * rayLen;
+        const endY = originY + Math.sin(angle) * rayLen;
+
+        // Find all enemies along the ray and damage them (pierce through all)
+        for (let j = state.enemies.length - 1; j >= 0; j--) {
+            const e = state.enemies[j];
+            const def = ENEMY_TYPES[e.type];
+            // Point-to-line distance
+            const dx = endX - originX;
+            const dy = endY - originY;
+            const t = Math.max(0, Math.min(1, ((e.x - originX) * dx + (e.y - originY) * dy) / (dx * dx + dy * dy)));
+            const closestX = originX + t * dx;
+            const closestY = originY + t * dy;
+            const dist = Math.hypot(e.x - closestX, e.y - closestY);
+
+            if (dist < def.size + 10) {
+                e.hp -= wDef.damage;
+                e.hitFlash = 10;
+
+                for (let k = 0; k < 6; k++) {
+                    state.particles.push({
+                        x: e.x, y: e.y,
+                        vx: (Math.random() - 0.5) * 5,
+                        vy: (Math.random() - 0.5) * 5,
+                        life: 20 + Math.random() * 10,
+                        color: def.color,
+                        size: 2 + Math.random() * 3,
+                    });
+                }
+
+                if (e.hp <= 0) {
+                    for (let k = 0; k < 15; k++) {
+                        const a = Math.random() * Math.PI * 2;
+                        const spd = 1 + Math.random() * 4;
+                        state.particles.push({
+                            x: e.x, y: e.y,
+                            vx: Math.cos(a) * spd,
+                            vy: Math.sin(a) * spd,
+                            life: 30 + Math.random() * 20,
+                            color: def.color,
+                            size: 3 + Math.random() * 4,
+                        });
+                    }
+                    state.score += def.score;
+                    updateScoreHUD();
+                    state.enemies.splice(j, 1);
+                }
+            }
+        }
+
+        // Add visual beam
+        state.beams.push({
+            x1: originX, y1: originY,
+            x2: endX, y2: endY,
+            color: wDef.color,
+            life: 12,
+            maxLife: 12,
+        });
+    } else if (p.weapon === 'keyboard') {
+        // Keyboard: shotgun spread — fires 5 keycaps in a cone
+        const spreadCount = 5;
+        const spreadAngle = 0.35; // ~20 degrees total cone
+        for (let s = 0; s < spreadCount; s++) {
+            const a = angle + (s - (spreadCount - 1) / 2) * (spreadAngle / (spreadCount - 1))
+                + (Math.random() - 0.5) * 0.08;
+            const speedVar = wDef.speed * (0.9 + Math.random() * 0.2);
+            state.projectiles.push({
+                x: p.x + TILE / 2,
+                y: p.y + TILE / 2,
+                vx: Math.cos(a) * speedVar,
+                vy: Math.sin(a) * speedVar,
+                damage: Math.round(wDef.damage * 0.5),
+                color: wDef.color,
+                size: wDef.projectileSize * 0.8,
+                life: 60,
+                fromPlayer: true,
+                weaponType: p.weapon,
+            });
+        }
+    } else if (p.weapon === 'code') {
+        // Code Blaster: standard rapid-fire projectile
+        state.projectiles.push({
+            x: p.x + TILE / 2,
+            y: p.y + TILE / 2,
+            vx: Math.cos(angle) * wDef.speed,
+            vy: Math.sin(angle) * wDef.speed,
+            damage: wDef.damage,
+            color: wDef.color,
+            size: wDef.projectileSize,
+            life: 90,
+            fromPlayer: true,
+            weaponType: p.weapon,
+        });
+    } else if (p.weapon === 'agile') {
+        // Agile Boomerang: homes toward nearest enemy, then returns
+        let fireAngle = angle;
+        // Auto-aim at nearest enemy if one is in range
+        let closestDist = 400;
+        for (const e of state.enemies) {
+            const d = Math.hypot(e.x - (p.x + TILE / 2), e.y - (p.y + TILE / 2));
+            if (d < closestDist) {
+                closestDist = d;
+                fireAngle = Math.atan2(e.y - (p.y + TILE / 2), e.x - (p.x + TILE / 2));
+            }
+        }
+        state.projectiles.push({
+            x: p.x + TILE / 2,
+            y: p.y + TILE / 2,
+            vx: Math.cos(fireAngle) * wDef.speed * 1.3,
+            vy: Math.sin(fireAngle) * wDef.speed * 1.3,
+            damage: wDef.damage,
+            color: wDef.color,
+            size: wDef.projectileSize * 1.8,
+            life: 120,
+            fromPlayer: true,
+            weaponType: p.weapon,
+            boomerang: true,
+            boomerangTimer: 0,
+            originX: p.x + TILE / 2,
+            originY: p.y + TILE / 2,
+            hitEnemies: [],
+            angle: fireAngle,
+        });
+    } else {
+        // Standard projectile (with weaponType tag for coffee)
+        state.projectiles.push({
+            x: p.x + TILE / 2,
+            y: p.y + TILE / 2,
+            vx: Math.cos(angle) * wDef.speed,
+            vy: Math.sin(angle) * wDef.speed,
+            damage: wDef.damage,
+            color: wDef.color,
+            size: wDef.projectileSize,
+            life: 120,
+            fromPlayer: true,
+            weaponType: p.weapon,
+        });
+    }
 
     // Muzzle particles
     for (let i = 0; i < 4; i++) {
@@ -475,12 +629,13 @@ function tryShoot() {
 
 function spawnEnemyWave() {
     state.wave++;
-    const count = 3 + Math.floor(state.wave * 1.5);
+    const w = state.wave;
+    const count = 2 + Math.floor(w * w * 0.5); // quadratic scaling
     const types = Object.keys(ENEMY_TYPES);
 
     for (let i = 0; i < count; i++) {
-        // Pick type based on wave difficulty
-        let typeIdx = Math.floor(Math.random() * Math.min(types.length, 1 + Math.floor(state.wave / 2)));
+        // Pick type based on wave difficulty — unlock faster
+        let typeIdx = Math.floor(Math.random() * Math.min(types.length, 1 + Math.floor(w / 1.5)));
         const type = types[typeIdx];
         const def = ENEMY_TYPES[type];
 
@@ -511,12 +666,15 @@ function spawnEnemyWave() {
             state.player.x + TILE / 2 - sx
         );
 
+        const scaledHp = def.hp * (1 + w * 0.25);       // 25% more HP per wave (multiplicative)
+        const scaledSpeed = def.speed * (1 + w * 0.08);  // 8% faster per wave
+
         state.enemies.push({
             x: sx, y: sy,
-            hp: def.hp + state.wave * 3,
-            maxHp: def.hp + state.wave * 3,
+            hp: scaledHp,
+            maxHp: scaledHp,
             type: type,
-            speed: def.speed + state.wave * 0.05,
+            speed: scaledSpeed,
             damage: def.damage,
             attackCooldown: 0,
             maxAttackCooldown: def.attackCooldown,
@@ -565,18 +723,20 @@ function openModal(building) {
                 btn.addEventListener('click', () => {
                     state.player.weapon = weaponKey;
                     state.player.ammo = wDef.ammo;
-                    weaponSpawn.collected = true;
+                    collectWeaponAtBuilding(building.id);
                     updateWeaponHUD();
                     showPickupNotification(wDef);
-                    btn.textContent = 'Equipped!';
-                    btn.disabled = true;
-                    btn.style.opacity = '0.6';
+                    closeModal();
                 });
             }
         }, 0);
     }
 
-    document.getElementById('modal-overlay').classList.remove('hidden');
+    const overlay = document.getElementById('modal-overlay');
+    overlay.classList.remove('hidden');
+    overlay.scrollTop = 0;
+    document.getElementById('modal').scrollTop = 0;
+    contentDiv.scrollTop = 0;
 }
 
 function closeModal() {
@@ -660,14 +820,15 @@ document.getElementById('respawn-btn').addEventListener('click', () => {
     state.enemies = [];
     state.projectiles = [];
     state.particles = [];
+    state.beams = [];
+    state.hazardZones = [];
+    state.noWeaponText = null;
     state.score = 0;
     state.wave = 0;
     state.waveTimer = 0;
     // Reset weapon spawn — first weapon at HQ again
-    weaponSpawn.buildingId = null;
-    weaponSpawn.weaponKey = null;
-    weaponSpawn.collected = false;
-    weaponSpawn.cooldown = 0;
+    weaponSpawns.length = 0;
+    weaponSpawnTimer = 0;
     state.player.weapon = null;
     state.player.ammo = 0;
     spawnWeaponInRandomBuilding('home', true);
@@ -807,24 +968,35 @@ function update() {
     if (p.fireCooldown > 0) p.fireCooldown--;
     if (p.invincible > 0) p.invincible--;
 
+    // Auto-fire: hold mouse/space to keep shooting with Code Blaster
+    if (!state.modalOpen && p.weapon === 'code' && (state.mouse.down || state.keys[' '])) {
+        tryShoot();
+    }
+
     // --- Weapon spawn system ---
     if (!state.modalOpen) {
         // First weapon spawns immediately at Ceon HQ (silent)
-        if (weaponSpawn.buildingId === null) {
+        if (weaponSpawns.length === 0 && state.time < 10) {
             spawnWeaponInRandomBuilding('home', true);
         }
-        // Spawn new weapon when ammo runs out
-        if (weaponSpawn.collected && p.weapon && p.ammo <= 0) {
-            spawnWeaponInRandomBuilding();
+        // Clear weapon when ammo runs out
+        if (p.weapon && p.ammo <= 0) {
             p.weapon = null;
             updateWeaponHUD();
+        }
+        // Spawn new weapons on a regular timer
+        weaponSpawnTimer++;
+        if (weaponSpawnTimer >= WEAPON_SPAWN_INTERVAL) {
+            weaponSpawnTimer = 0;
+            spawnWeaponInRandomBuilding();
         }
     }
 
     // --- Enemy wave spawning ---
     if (!state.modalOpen) {
         state.waveTimer++;
-        if (state.waveTimer >= 600 && state.enemies.length < 5) {
+        const waveThreshold = Math.max(300, 600 - state.wave * 30);
+        if (state.waveTimer >= waveThreshold && state.enemies.length < 5) {
             spawnEnemyWave();
             state.waveTimer = 0;
         }
@@ -834,7 +1006,8 @@ function update() {
         }
     }
 
-    // --- Update enemies ---
+    // --- Update enemies (frozen when modal open) ---
+    if (!state.modalOpen) {
     for (let i = state.enemies.length - 1; i >= 0; i--) {
         const e = state.enemies[i];
         const def = ENEMY_TYPES[e.type];
@@ -844,7 +1017,7 @@ function update() {
 
         if (e.hitFlash > 0) e.hitFlash--;
 
-        if (inRange && !state.modalOpen) {
+        if (inRange) {
             // Chase player
             const angle = Math.atan2(pCenterY - e.y, pCenterX - e.x);
             const nx = e.x + Math.cos(angle) * e.speed;
@@ -876,6 +1049,23 @@ function update() {
                         playerDeath();
                         return;
                     }
+                    // Suicidal enemies (NullPointer) die after one attack
+                    if (def.suicidal) {
+                        for (let k = 0; k < 10; k++) {
+                            const a = Math.random() * Math.PI * 2;
+                            const spd = 1 + Math.random() * 3;
+                            state.particles.push({
+                                x: e.x, y: e.y,
+                                vx: Math.cos(a) * spd,
+                                vy: Math.sin(a) * spd,
+                                life: 20 + Math.random() * 15,
+                                color: def.color,
+                                size: 2 + Math.random() * 3,
+                            });
+                        }
+                        state.enemies.splice(i, 1);
+                        break;
+                    }
                 }
             }
         } else {
@@ -903,16 +1093,104 @@ function update() {
         }
 
         if (e.attackCooldown > 0) e.attackCooldown--;
-    }
 
-    // --- Update projectiles ---
+        // --- Hazard zone damage-over-time ---
+        for (const zone of state.hazardZones) {
+            const distToZone = Math.hypot(e.x - zone.x, e.y - zone.y);
+            if (distToZone < zone.radius + def.size * 0.5) {
+                if (!e.hazardCooldown || e.hazardCooldown <= 0) {
+                    e.hp -= zone.damage;
+                    e.hitFlash = 6;
+                    e.hazardCooldown = 20; // tick cooldown to avoid 60dps
+                    if (e.hp <= 0) {
+                        for (let k = 0; k < 15; k++) {
+                            const angle = Math.random() * Math.PI * 2;
+                            const spd = 1 + Math.random() * 4;
+                            state.particles.push({
+                                x: e.x, y: e.y,
+                                vx: Math.cos(angle) * spd,
+                                vy: Math.sin(angle) * spd,
+                                life: 30 + Math.random() * 20,
+                                color: def.color,
+                                size: 3 + Math.random() * 4,
+                            });
+                        }
+                        state.score += def.score;
+                        updateScoreHUD();
+                        state.enemies.splice(i, 1);
+                        break;
+                    }
+                }
+            }
+        }
+        if (state.enemies[i] && state.enemies[i].hazardCooldown > 0) {
+            state.enemies[i].hazardCooldown--;
+        }
+    }
+    } // end modal check for enemies
+
+    // --- Update projectiles (frozen when modal open) ---
+    if (!state.modalOpen) {
     for (let i = state.projectiles.length - 1; i >= 0; i--) {
         const proj = state.projectiles[i];
+
+        // Boomerang: curve back toward player after a delay
+        if (proj.boomerang) {
+            proj.boomerangTimer++;
+            if (proj.boomerangTimer > 20) {
+                // Steer back toward current player position
+                const targetAngle = Math.atan2(
+                    state.player.y + TILE / 2 - proj.y,
+                    state.player.x + TILE / 2 - proj.x
+                );
+                const currentAngle = Math.atan2(proj.vy, proj.vx);
+                let diff = targetAngle - currentAngle;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                const newAngle = currentAngle + diff * 0.08;
+                const spd = Math.hypot(proj.vx, proj.vy);
+                proj.vx = Math.cos(newAngle) * spd;
+                proj.vy = Math.sin(newAngle) * spd;
+            }
+            // Spin particles
+            if (state.time % 2 === 0) {
+                const spinAngle = state.time * 0.3;
+                state.particles.push({
+                    x: proj.x + Math.cos(spinAngle) * 6,
+                    y: proj.y + Math.sin(spinAngle) * 6,
+                    vx: (Math.random() - 0.5), vy: (Math.random() - 0.5),
+                    life: 10, color: '#81c784', size: 2,
+                });
+            }
+            // Despawn when it returns near the player (after outward phase)
+            if (proj.boomerangTimer > 40) {
+                const distToPlayer = Math.hypot(
+                    proj.x - (state.player.x + TILE / 2),
+                    proj.y - (state.player.y + TILE / 2)
+                );
+                if (distToPlayer < 30) {
+                    state.projectiles.splice(i, 1);
+                    continue;
+                }
+            }
+        }
+
         proj.x += proj.vx;
         proj.y += proj.vy;
         proj.life--;
 
-        if (proj.life <= 0 || proj.x < 0 || proj.x > MAP_W || proj.y < 0 || proj.y > MAP_H) {
+        const expired = proj.life <= 0 || proj.x < 0 || proj.x > MAP_W || proj.y < 0 || proj.y > MAP_H;
+
+        // Spawn coffee hazard zone on expire
+        if (expired && proj.weaponType === 'coffee') {
+            state.hazardZones.push({
+                x: proj.x, y: proj.y,
+                radius: 50, damage: 10, life: 360,
+                color: '#8d6e63',
+            });
+        }
+
+        if (expired) {
             state.projectiles.splice(i, 1);
             continue;
         }
@@ -927,6 +1205,14 @@ function update() {
             }
         }
         if (hitBuilding) {
+            // Spawn coffee hazard on building hit
+            if (proj.weaponType === 'coffee') {
+                state.hazardZones.push({
+                    x: proj.x, y: proj.y,
+                    radius: 50, damage: 10, life: 360,
+                    color: '#8d6e63',
+                });
+            }
             // Spark particles
             for (let j = 0; j < 3; j++) {
                 state.particles.push({
@@ -942,11 +1228,15 @@ function update() {
 
         // Hit enemies (only player projectiles)
         if (proj.fromPlayer) {
+            let projectileConsumed = false;
             for (let j = state.enemies.length - 1; j >= 0; j--) {
                 const e = state.enemies[j];
                 const def = ENEMY_TYPES[e.type];
                 const dist = Math.hypot(proj.x - e.x, proj.y - e.y);
                 if (dist < def.size + proj.size) {
+                    // Boomerang: skip already-hit enemies
+                    if (proj.boomerang && proj.hitEnemies.includes(j)) continue;
+
                     e.hp -= proj.damage;
                     e.hitFlash = 8;
 
@@ -962,7 +1252,14 @@ function update() {
                         });
                     }
 
-                    state.projectiles.splice(i, 1);
+                    // Spawn coffee hazard on enemy hit
+                    if (proj.weaponType === 'coffee') {
+                        state.hazardZones.push({
+                            x: proj.x, y: proj.y,
+                            radius: 50, damage: 10, life: 360,
+                            color: '#8d6e63',
+                        });
+                    }
 
                     if (e.hp <= 0) {
                         // Death explosion
@@ -982,13 +1279,26 @@ function update() {
                         updateScoreHUD();
                         state.enemies.splice(j, 1);
                     }
+
+                    // Boomerang pierces through enemies
+                    if (proj.boomerang) {
+                        proj.hitEnemies.push(j);
+                        continue;
+                    }
+
+                    // Normal projectiles are consumed on hit
+                    projectileConsumed = true;
+                    state.projectiles.splice(i, 1);
                     break;
                 }
             }
+            if (projectileConsumed) continue;
         }
     }
+    } // end modal check for projectiles
 
-    // --- Update particles ---
+    // --- Update particles (frozen when modal open) ---
+    if (!state.modalOpen) {
     for (let i = state.particles.length - 1; i >= 0; i--) {
         const part = state.particles[i];
         part.x += part.vx;
@@ -997,6 +1307,29 @@ function update() {
         part.vy *= 0.95;
         part.life--;
         if (part.life <= 0) state.particles.splice(i, 1);
+    }
+    } // end modal check for particles
+
+    // --- Update beams ---
+    if (!state.modalOpen) {
+    for (let i = state.beams.length - 1; i >= 0; i--) {
+        state.beams[i].life--;
+        if (state.beams[i].life <= 0) state.beams.splice(i, 1);
+    }
+    }
+
+    // --- Update hazard zones ---
+    if (!state.modalOpen) {
+    for (let i = state.hazardZones.length - 1; i >= 0; i--) {
+        state.hazardZones[i].life--;
+        if (state.hazardZones[i].life <= 0) state.hazardZones.splice(i, 1);
+    }
+    }
+
+    // --- Update noWeaponText ---
+    if (state.noWeaponText) {
+        state.noWeaponText.life--;
+        if (state.noWeaponText.life <= 0) state.noWeaponText = null;
     }
 
     // --- Pickup notification ---
@@ -1214,6 +1547,22 @@ function drawPlayer() {
     ctx.shadowBlur = 3;
     ctx.fillText('Vierailija', sx + TILE / 2, sy - 4);
     ctx.restore();
+
+    // "Find a weapon" floating text
+    if (state.noWeaponText) {
+        const n = state.noWeaponText;
+        const alpha = Math.min(1, n.life / 30);
+        const floatY = (90 - n.life) * 0.4;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.font = 'bold 13px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ffc107';
+        ctx.shadowColor = 'rgba(0,0,0,0.9)';
+        ctx.shadowBlur = 4;
+        ctx.fillText(n.text, sx + TILE / 2, sy - 18 - floatY);
+        ctx.restore();
+    }
 }
 
 function drawEnemy(e) {
@@ -1372,6 +1721,117 @@ function drawParticles() {
         ctx.beginPath();
         ctx.arc(sx, sy, part.size * alpha, 0, Math.PI * 2);
         ctx.fill();
+        ctx.restore();
+    }
+}
+
+function drawBeams() {
+    for (const beam of state.beams) {
+        const x1 = beam.x1 - state.camera.x;
+        const y1 = beam.y1 - state.camera.y;
+        const x2 = beam.x2 - state.camera.x;
+        const y2 = beam.y2 - state.camera.y;
+        const alpha = beam.life / beam.maxLife;
+
+        ctx.save();
+        // Outer glow
+        ctx.globalAlpha = alpha * 0.3;
+        ctx.strokeStyle = beam.color;
+        ctx.lineWidth = 12;
+        ctx.shadowColor = beam.color;
+        ctx.shadowBlur = 20;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+
+        // Core beam
+        ctx.globalAlpha = alpha * 0.8;
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 3;
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        ctx.restore();
+    }
+}
+
+function drawHazardZones() {
+    for (const zone of state.hazardZones) {
+        const sx = zone.x - state.camera.x;
+        const sy = zone.y - state.camera.y;
+
+        if (sx < -zone.radius * 2 || sx > canvas.width + zone.radius * 2 ||
+            sy < -zone.radius * 2 || sy > canvas.height + zone.radius * 2) continue;
+
+        const alpha = Math.min(1, zone.life / 90) * 0.85;
+        const pulse = 1 + Math.sin(state.time * 0.08) * 0.06;
+
+        ctx.save();
+
+        // Dark base pool (opaque)
+        const baseGrad = ctx.createRadialGradient(sx, sy, 0, sx, sy, zone.radius * pulse);
+        baseGrad.addColorStop(0, `rgba(62, 39, 25, ${alpha * 0.9})`);
+        baseGrad.addColorStop(0.5, `rgba(78, 52, 33, ${alpha * 0.75})`);
+        baseGrad.addColorStop(0.85, `rgba(93, 64, 46, ${alpha * 0.4})`);
+        baseGrad.addColorStop(1, `rgba(93, 64, 46, 0)`);
+        ctx.fillStyle = baseGrad;
+        ctx.beginPath();
+        ctx.arc(sx, sy, zone.radius * pulse, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Bright coffee sheen highlight
+        const sheenGrad = ctx.createRadialGradient(
+            sx - zone.radius * 0.2, sy - zone.radius * 0.2, 0,
+            sx, sy, zone.radius * 0.7
+        );
+        sheenGrad.addColorStop(0, `rgba(180, 130, 80, ${alpha * 0.5})`);
+        sheenGrad.addColorStop(0.5, `rgba(160, 110, 60, ${alpha * 0.25})`);
+        sheenGrad.addColorStop(1, `rgba(140, 90, 50, 0)`);
+        ctx.fillStyle = sheenGrad;
+        ctx.beginPath();
+        ctx.arc(sx, sy, zone.radius * 0.7, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Glowing edge ring
+        ctx.globalAlpha = alpha * 0.4;
+        ctx.strokeStyle = '#a1887f';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(sx, sy, zone.radius * pulse * 0.9, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Bubbles
+        ctx.globalAlpha = alpha * 0.8;
+        for (let i = 0; i < 5; i++) {
+            const bx = sx + Math.sin(state.time * 0.06 + i * 1.9) * zone.radius * 0.5;
+            const by = sy + Math.cos(state.time * 0.08 + i * 1.4) * zone.radius * 0.5;
+            const bs = 2.5 + Math.sin(state.time * 0.15 + i * 0.7) * 1.5;
+            ctx.fillStyle = '#c8a882';
+            ctx.beginPath();
+            ctx.arc(bx, by, bs, 0, Math.PI * 2);
+            ctx.fill();
+            // Bubble highlight
+            ctx.fillStyle = `rgba(220, 190, 150, ${alpha * 0.5})`;
+            ctx.beginPath();
+            ctx.arc(bx - 1, by - 1, bs * 0.4, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Steam wisps rising above the pool
+        ctx.globalAlpha = alpha * 0.3;
+        ctx.fillStyle = 'rgba(200, 180, 160, 0.4)';
+        for (let i = 0; i < 3; i++) {
+            const wx = sx + Math.sin(state.time * 0.03 + i * 2.5) * zone.radius * 0.3;
+            const wy = sy - zone.radius * 0.3 - (state.time * 0.5 + i * 15) % 30;
+            const ws = 4 + Math.sin(state.time * 0.04 + i) * 2;
+            ctx.beginPath();
+            ctx.arc(wx, wy, ws, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
         ctx.restore();
     }
 }
@@ -1596,7 +2056,9 @@ function render() {
         else if (d.type === 'enemy') drawEnemy(d.data);
     }
 
+    drawHazardZones();
     drawProjectiles();
+    drawBeams();
     drawParticles();
     drawCrosshair();
     drawPickupNotification();
