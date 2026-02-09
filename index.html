@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The New Ceon.fi Experience</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+        <div id="hud">
+            <div id="hud-title">The New Ceon.fi Experience</div>
+            <div id="hud-controls">WASD to move &middot; E to interact &middot; Click / Space to shoot</div>
+            <div id="hud-health">
+                <div id="health-bar"><div id="health-fill"></div></div>
+                <span id="health-text">100</span>
+            </div>
+            <div id="hud-weapon">
+                <span id="weapon-icon"></span>
+                <span id="weapon-name">No weapon</span>
+                <span id="ammo-count"></span>
+            </div>
+            <div id="hud-score">
+                <span id="score-label">Score:</span>
+                <span id="score-value">0</span>
+            </div>
+        </div>
+        <div id="damage-flash"></div>
+        <div id="death-screen" class="hidden">
+            <div id="death-content">
+                <h2>The Bugs Won.</h2>
+                <p id="death-score"></p>
+                <div class="death-message">
+                    <p class="death-headline">Don't let this happen to your business.</p>
+                    <p class="death-sub">Bugs, legacy code, tech debt and null pointers are lurking in every codebase. <strong>Ceon's experts will eliminate them before they take you down.</strong></p>
+                </div>
+                <div class="death-form">
+                    <h3>Get in touch &mdash; we'll handle the bugs for you</h3>
+                    <form id="contact-form" onsubmit="return false;">
+                        <div class="form-row">
+                            <input type="text" id="form-name" placeholder="Your name" required>
+                            <input type="email" id="form-email" placeholder="Email address" required>
+                        </div>
+                        <input type="text" id="form-company" placeholder="Company / organization">
+                        <textarea id="form-message" rows="3" placeholder="Tell us about your project &mdash; what bugs are haunting you?"></textarea>
+                        <button type="submit" id="form-submit-btn">Send &mdash; Save Me From The Bugs!</button>
+                    </form>
+                    <div id="form-success" class="hidden">
+                        <div class="success-icon">&#9989;</div>
+                        <p>Thanks! We'll be in touch soon to squash those bugs.</p>
+                    </div>
+                </div>
+                <div class="death-contact-alt">
+                    <p>Or reach us directly:</p>
+                    <div class="death-phones">
+                        <span>&#128222; +358 45 1327 360</span>
+                        <span>&#128222; +358 44 555 5360</span>
+                        <span>&#128222; +358 50 544 1255</span>
+                    </div>
+                    <p class="death-address">Karvaamokuja 4, 00380 Helsinki, 5. kerros</p>
+                </div>
+                <button id="respawn-btn">Try Again (but you really should contact us)</button>
+            </div>
+        </div>
+        <div id="interact-prompt" class="hidden">
+            <span id="interact-text">Press E to enter</span>
+        </div>
+        <div id="minimap-container">
+            <canvas id="minimap"></canvas>
+        </div>
+    </div>
+
+    <!-- Content Modal -->
+    <div id="modal-overlay" class="hidden">
+        <div id="modal">
+            <button id="modal-close">&times;</button>
+            <div id="modal-content"></div>
+        </div>
+    </div>
+
+    <!-- Welcome Screen -->
+    <div id="welcome-screen">
+        <div id="welcome-content">
+            <h1>The New Ceon.fi Experience</h1>
+            <p>Tervetuloa Ceonin maailmaan!</p>
+            <p class="welcome-desc">Explore Ceon's virtual office park. Walk around and visit different buildings to learn about our services.</p>
+            <div class="welcome-controls">
+                <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or <kbd>&uarr;</kbd><kbd>&larr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd> to move</div>
+                <div><kbd>E</kbd> to enter buildings &middot; pick up weapons inside!</div>
+                <div><kbd>Click</kbd> or <kbd>Space</kbd> to shoot &middot; evade the bugs!</div>
+            </div>
+            <button id="start-btn">Start Exploring</button>
+        </div>
+    </div>
+
+    <!-- Page Content Templates -->
+    <template id="content-home">
+        <div class="page-content">
+            <h1>Ceon Oy</h1>
+            <h2>Laadukasta ohjelmistokehityst&auml;</h2>
+            <div class="hero-tagline">Autamme sinua digitalisoimaan liiketoimintasi ideasta yll&auml;pitoon</div>
+            <div class="stats-row">
+                <div class="stat"><span class="stat-num">16</span><span class="stat-label">asiantuntijaa</span></div>
+                <div class="stat"><span class="stat-num">30+</span><span class="stat-label">tyytyv&auml;ist&auml; asiakasta</span></div>
+            </div>
+            <div class="section">
+                <h3>Ohjelmistokehityst&auml; ihmiselt&auml; ihmisille</h3>
+                <p>Suunnittelemme, toteutamme ja yll&auml;pid&auml;mme liiketoiminnalle t&auml;rkeit&auml; verkkopalveluita sek&auml; mobiiliapplikaatioita. Olemme vuonna 2017 perustettu ohjelmistoyritys.</p>
+                <p>Hy&ouml;dynn&auml;mme palvelumuotoilun menetelmi&auml; ymm&auml;rt&auml;&auml;ksemme liiketoiminnan tarpeita ja kehit&auml;mme verkkopalveluita yhteisty&ouml;ss&auml; asiakkaidemme ja loppuk&auml;ytt&auml;jien kanssa.</p>
+                <p>Toimintaamme leimaa l&auml;pin&auml;kyvyys, rehellisyys sek&auml; asiakasl&auml;ht&ouml;isyys.</p>
+            </div>
+            <div class="section">
+                <h3>Teknologiat</h3>
+                <div class="tech-tags">
+                    <span class="tag">JavaScript</span>
+                    <span class="tag">React</span>
+                    <span class="tag">Node.js</span>
+                    <span class="tag">Python</span>
+                    <span class="tag">Java</span>
+                    <span class="tag">AWS</span>
+                    <span class="tag">Google Cloud</span>
+                    <span class="tag">PHP</span>
+                </div>
+            </div>
+            <div class="section">
+                <h3>Palvelumme</h3>
+                <ul>
+                    <li>Palvelumuotoilu / UX-suunnittelu</li>
+                    <li>Ohjelmistokehitys</li>
+                    <li>Verkkopalvelun yll&auml;pito ja tuki</li>
+                </ul>
+            </div>
+        </div>
+    </template>
+
+    <template id="content-palvelumuotoilu">
+        <div class="page-content">
+            <h1>Palvelumuotoilu</h1>
+            <h2>Palvelumuotoilun keinoin kokonaisvaltaista kehitt&auml;mist&auml;</h2>
+            <p class="lead">Autamme teit&auml; luomaan vaikuttavia palveluita k&auml;ytt&auml;j&auml;tietojen pohjalta.</p>
+
+            <div class="section">
+                <h3>Mit&auml; palvelumuotoilu on?</h3>
+                <p>Palvelumuotoilu on menetelm&auml;, jonka avulla suunnitellaan palveluita niin, ett&auml; ne vastaavat paremmin k&auml;ytt&auml;jien tarpeisiin ja liiketoiminnan tavoitteisiin.</p>
+                <p>Palvelumuotoilussa k&auml;ytt&auml;j&auml;t otetaan mukaan palvelun kehitykseen alusta l&auml;htien. Sen avulla luodaan ja kehitet&auml;&auml;n palveluita, jotka vastaavat suoraan k&auml;ytt&auml;jien todellisia tarpeita ja tukevat samalla liiketoiminnan tavoitteita.</p>
+            </div>
+
+            <div class="section">
+                <h3>Miksi palvelumuotoilu on t&auml;rke&auml;&auml;?</h3>
+                <p>Palvelumuotoilu v&auml;hent&auml;&auml; merkitt&auml;v&auml;sti riskej&auml; ja kustannuksia. IEEE:n tutkimuksen mukaan ohjelmistokehityksess&auml; &ldquo;virheen korjaaminen j&auml;lkik&auml;teen voi maksaa jopa sata kertaa enemm&auml;n&rdquo; kuin suunnitteluvaiheessa.</p>
+                <p>Lis&auml;ksi Forresterin tutkimuksen mukaan jopa 50 % ohjelmistokehitysty&ouml;st&auml; voidaan v&auml;ltt&auml;&auml; osallistamalla k&auml;ytt&auml;j&auml;t kunnolla palvelun m&auml;&auml;rittelyyn alusta l&auml;htien.</p>
+            </div>
+
+            <div class="section">
+                <h3>Ihmisl&auml;ht&ouml;isi&auml; palvelupolkuja</h3>
+                <p>K&auml;ytt&auml;j&auml;l&auml;ht&ouml;isyys on olennainen tekij&auml;, kun kehit&auml;mme menestyksekk&auml;it&auml; palveluita organisaatioille toimialasta riippumatta. Se tarkoittaa, ett&auml; suunnittelemme ja toteutamme palvelut pit&auml;en ensisijaisesti mieless&auml; loppuk&auml;ytt&auml;j&auml;t.</p>
+            </div>
+
+            <div class="section">
+                <h3>Miten organisaationne voi hy&ouml;ty&auml;?</h3>
+                <ul>
+                    <li>Tunnistaa pullonkaulat, tehottomuudet ja mahdollisuudet palveluprosessien optimointiin</li>
+                    <li>K&auml;ytt&auml;j&auml;ymm&auml;rrys s&auml;&auml;st&auml;&auml; merkitt&auml;v&auml;sti resursseja, aikaa sek&auml; kustannuksia</li>
+                    <li>Palvelumuotoiluprosessi johtaa palveluihin, jotka todella vastaavat k&auml;ytt&auml;jien toiveita</li>
+                    <li>Ihmisl&auml;ht&ouml;inen palvelumuotoilu parantaa kilpailuetuanne ja vahvistaa k&auml;ytt&auml;j&auml;uskollisuutta</li>
+                    <li>Minimoimme riskit tekem&auml;ll&auml; objektiivisen m&auml;&auml;rittelyty&ouml;n</li>
+                    <li>Palvelumuotoilun avulla maksimoimme sijoitetun p&auml;&auml;oman tuoton sek&auml; palveluiden arvon</li>
+                </ul>
+            </div>
+        </div>
+    </template>
+
+    <template id="content-ohjelmistokehitys">
+        <div class="page-content">
+            <h1>Ohjelmistokehitys</h1>
+            <h2>Ohjelmistokehityst&auml; liiketoiminnan sek&auml; k&auml;ytt&auml;jien tarpeet edell&auml;</h2>
+            <p class="lead">Toteutamme prototyyppej&auml;, mobiiliapplikaatioita ja verkkopalveluita liiketoiminnan tarpeisiin.</p>
+
+            <div class="section">
+                <h3>Laadukkaita mobiili- ja verkkopalveluita</h3>
+                <p>Suunnittelemme ja toteutamme mobiili- ja verkkopalveluita avoimen l&auml;hdekoodin ratkaisujen pohjalta. Teemme ty&ouml;t&auml; intohimolla ja ammattitaidolla, samalla haastaen niin itsemme kuin asiakkaamme.</p>
+                <p>Avoimen l&auml;hdekoodin ratkaisut varmistavat, ettei hankkeesta tule ylim&auml;&auml;r&auml;isi&auml; kustannuksia.</p>
+                <p>Haemme aina pitkiä kumppanuuksia yksitt&auml;isten toimeksiantojen sijaan.</p>
+            </div>
+
+            <div class="section">
+                <h3>Prototypointi</h3>
+                <p>Uuden verkkopalvelun tai mobiiliapplikaation idea kannattaa aina testata ensin prototyypill&auml; ja loppuk&auml;ytt&auml;jill&auml;. Kehit&auml;mme graafisia prototyyppej&auml; k&auml;ytt&auml;j&auml;testausta varten ennen varsinaista kehitysty&ouml;t&auml;.</p>
+            </div>
+
+            <div class="section">
+                <h3>Ohjelmistokehityksemme peruspilarit</h3>
+                <div class="pillars">
+                    <div class="pillar">
+                        <div class="pillar-icon">&#128293;</div>
+                        <h4>Intohimo</h4>
+                        <p>Teemme ty&ouml;t&auml; intohimolla</p>
+                    </div>
+                    <div class="pillar">
+                        <div class="pillar-icon">&#9889;</div>
+                        <h4>Ketteryys</h4>
+                        <p>Kettera kehitys muuttuviin tarpeisiin</p>
+                    </div>
+                    <div class="pillar">
+                        <div class="pillar-icon">&#128170;</div>
+                        <h4>Vastuunkanto</h4>
+                        <p>Seisomme koodimme takana</p>
+                    </div>
+                    <div class="pillar">
+                        <div class="pillar-icon">&#128300;</div>
+                        <h4>Kokeileminen</h4>
+                        <p>Tutkimme uusimpia teknologioita</p>
+                    </div>
+                    <div class="pillar">
+                        <div class="pillar-icon">&#128172;</div>
+                        <h4>Kommunikointi</h4>
+                        <p>Tiimity&ouml; ja avoin viestint&auml;</p>
+                    </div>
+                    <div class="pillar">
+                        <div class="pillar-icon">&#9989;</div>
+                        <h4>Laatu ja testaus</h4>
+                        <p>Automaattitestit ja hyv&auml;t k&auml;yt&auml;nn&ouml;t</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <template id="content-yllapito">
+        <div class="page-content">
+            <h1>Verkkopalvelun yll&auml;pito</h1>
+            <h2>Palvelun yll&auml;pito ja k&auml;ytt&ouml;palvelu</h2>
+            <p class="lead">Kuka huolehtii verkkopalvelustasi?</p>
+
+            <div class="section">
+                <p>Verkkopalvelut vaativat aina huolenpitoa, p&auml;ivitt&auml;mist&auml; sek&auml; monitorointia. Jos palvelunne on liiketoiminnan kannalta t&auml;rke&auml;, kannattaa palvelun toimivuus ehdottomasti varmistaa.</p>
+                <p>T&auml;m&auml; tarkoittaa palvelimen p&auml;ivitt&auml;mist&auml;, monitorointia sek&auml; varmistamista, ett&auml; palvelun komponentit ovat ajan tasalla.</p>
+            </div>
+
+            <div class="section">
+                <h3>Kokonaisvaltainen ratkaisu</h3>
+                <p>Auditoinnin avulla selvit&auml;mme, miten palvelusi on rakennettu, ovatko komponentit kunnossa sek&auml; mit&auml; mahdollisuuksia sen kehitt&auml;miseen on.</p>
+                <p>Aktiivisella palvelusi monitoroinnilla saamme ajoissa tiedon mahdollisesta h&auml;iri&ouml;tilanteesta ja voit rauhassa nukkua y&ouml;si.</p>
+            </div>
+
+            <div class="section">
+                <h3>Mit&auml; yll&auml;pito kattaa?</h3>
+                <ul>
+                    <li>Palvelimen p&auml;ivitykset ja monitorointi</li>
+                    <li>Tietoturvap&auml;ivitykset ja vikatilanteissa auttaminen</li>
+                    <li>Komponenttien ajantasaisuuden varmistaminen</li>
+                    <li>Automaattiset varmuuskopioinnit</li>
+                    <li>Kuormituksen ja kapasiteetin seuranta</li>
+                    <li>Julkaisuputkien rakentaminen</li>
+                    <li>Analytiikan hy&ouml;dynt&auml;minen jatkokehityksess&auml;</li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h3>Miksi me?</h3>
+                <p><strong>Intohimo</strong> &ndash; Teemme ty&ouml;t&auml; intohimolla. T&auml;m&auml; n&auml;kyy loppuk&auml;ytt&auml;jien tyytyv&auml;isyyten&auml;.</p>
+                <p><strong>Ketteryys</strong> &ndash; Vastaamme nopeasti liiketoiminnan muuttuviin tarpeisiin.</p>
+                <p><strong>Vastuunkanto</strong> &ndash; Seisomme kirjoittamamme koodin takana.</p>
+                <p><strong>Laatu ja testaus</strong> &ndash; Hyv&auml;t ohjelmistokehityksen k&auml;yt&auml;nn&ouml;t varmistavat laadun.</p>
+            </div>
+        </div>
+    </template>
+
+    <template id="content-yhteystiedot">
+        <div class="page-content">
+            <h1>Ota yhteytt&auml;</h1>
+            <h2>Yhteydenotto on ensimm&auml;inen askel</h2>
+            <p class="lead">Kiinnostuitko? Ota meihin yhteytt&auml;!</p>
+
+            <div class="section">
+                <h3>Yhteystiedot</h3>
+                <div class="contact-cards">
+                    <div class="contact-card">
+                        <div class="contact-icon">&#128222;</div>
+                        <p>+358 45 1327 360</p>
+                    </div>
+                    <div class="contact-card">
+                        <div class="contact-icon">&#128222;</div>
+                        <p>+358 44 555 5360</p>
+                    </div>
+                    <div class="contact-card">
+                        <div class="contact-icon">&#128222;</div>
+                        <p>+358 50 544 1255</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h3>Toimisto</h3>
+                <div class="office-info">
+                    <div class="contact-icon">&#127970;</div>
+                    <p>Karvaamokuja 4<br>00380 Helsinki<br>5. kerros</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <h3>Rekrytointi</h3>
+                <p>Ota yhteytt&auml;, niin suunnitellaan sinulle sopiva ty&ouml;paikka!</p>
+                <p class="email-link">rekrytointi(at)ceon.fi</p>
+            </div>
+        </div>
+    </template>
+
+    <script src="js/game.js"></script>
+</body>
+</html>
